@@ -54,7 +54,7 @@ impl<V> ValueCounter<V> {
 
 impl<K: Hash + Eq + Clone, V> LFUCache<K, V> {
     pub fn with_capacity(capacity: usize) -> LFUCache<K, V> {
-        if capacity <= 0 {
+        if capacity == 0 {
             panic!("Unable to create cache: capacity is {:?}", capacity);
         }
         LFUCache {
@@ -66,11 +66,15 @@ impl<K: Hash + Eq + Clone, V> LFUCache<K, V> {
     }
 
     pub fn contains(&self, key: &K) -> bool {
-        return self.values.contains_key(key);
+        self.values.contains_key(key)
     }
 
     pub fn len(&self) -> usize {
         self.values.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
     }
 
     pub fn remove(&mut self, key: K) -> bool {
@@ -83,7 +87,7 @@ impl<K: Hash + Eq + Clone, V> LFUCache<K, V> {
                 .remove(&Rc::clone(&key));
             self.values.remove(&key);
         }
-        return false;
+        false
     }
 
     /// Returns the value associated with the given key (if it still exists)
@@ -170,9 +174,9 @@ impl<K: Eq + Hash + Clone, V> IntoIterator for LFUCache<K, V> {
     type IntoIter = LfuConsumer<K, V>;
 
     fn into_iter(self) -> Self::IntoIter {
-        return LfuConsumer {
+        LfuConsumer {
             values: self.values.into_iter(),
-        };
+        }
     }
 }
 
