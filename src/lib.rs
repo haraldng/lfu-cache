@@ -34,8 +34,8 @@ use std::rc::Rc;
 
 #[derive(Clone, Debug)]
 pub struct LFUCache<K: Hash + Eq + Clone, V> {
-    values: HashMap<Rc<K>, ValueCounter<V>>,
-    frequency_bin: HashMap<usize, LinkedHashSet<Rc<K>>>,
+    values: HashMap<K, ValueCounter<V>>,
+    frequency_bin: HashMap<usize, LinkedHashSet<K>>,
     capacity: usize,
     min_frequency: usize,
 }
@@ -77,43 +77,42 @@ impl<K: Hash + Eq + Clone, V> LFUCache<K, V> {
         self.values.is_empty()
     }
 
-    pub fn remove(&mut self, key: K) -> bool {
-        let key = Rc::new(key);
-        if let Some(value_counter) = self.values.get(&Rc::clone(&key)) {
+    pub fn remove(&mut self, key: K) -> Option<V> {
+        if let Some(value_counter) = self.values.get(&key) {
             let count = value_counter.count;
-            self.frequency_bin
-                .entry(count)
-                .or_default()
-                .remove(&Rc::clone(&key));
-            self.values.remove(&key);
+            self.frequency_bin.entry(count).or_default().remove(&key);
+            self.values.remove(&key).map(|x| x.value)
+        } else {
+            None
         }
-        false
     }
 
     /// Returns the value associated with the given key (if it still exists)
     /// Method marked as mutable because it internally updates the frequency of the accessed key
     pub fn get(&mut self, key: &K) -> Option<&V> {
-        let key = self.values.get_key_value(key).map(|(r, _)| Rc::clone(r))?;
-        self.update_frequency_bin(Rc::clone(&key));
+        self.update_frequency_bin(key);
         self.values.get(&key).map(|x| &x.value)
     }
 
     pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
-        let key = self.values.get_key_value(key).map(|(r, _)| Rc::clone(r))?;
-        self.update_frequency_bin(Rc::clone(&key));
+        self.update_frequency_bin(key);
         self.values.get_mut(&key).map(|x| &mut x.value)
     }
 
-    fn update_frequency_bin(&mut self, key: Rc<K>) {
-        let value_counter = self.values.get_mut(&key).unwrap();
-        let bin = self.frequency_bin.get_mut(&value_counter.count).unwrap();
-        bin.remove(&key);
-        let count = value_counter.count;
-        value_counter.inc();
-        if count == self.min_frequency && bin.is_empty() {
-            self.min_frequency += 1;
+    fn update_frequency_bin(&mut self, key: &K) {
+        if let Some(value_counter) = self.values.get_mut(&key) {
+            let bin = self.frequency_bin.get_mut(&value_counter.count).unwrap();
+            bin.remove(&key);
+            let count = value_counter.count;
+            value_counter.inc();
+            if count == self.min_frequency && bin.is_empty() {
+                self.min_frequency += 1;
+            }
+            self.frequency_bin
+                .entry(count + 1)
+                .or_default()
+                .insert(key.clone());
         }
-        self.frequency_bin.entry(count + 1).or_default().insert(key);
     }
 
     fn evict(&mut self) {
@@ -124,7 +123,7 @@ impl<K: Hash + Eq + Clone, V> LFUCache<K, V> {
 
     pub fn peek_lfu_key(&mut self) -> Option<K> {
         let least_frequently_used_keys = self.frequency_bin.get_mut(&self.min_frequency).unwrap();
-        least_frequently_used_keys.front().map(|x| (**x).clone())
+        least_frequently_used_keys.front().map(|x| x.clone())
     }
 
     pub fn iter(&self) -> LfuIterator<K, V> {
@@ -134,17 +133,16 @@ impl<K: Hash + Eq + Clone, V> LFUCache<K, V> {
     }
 
     pub fn set(&mut self, key: K, value: V) {
-        let key = Rc::new(key);
         if let Some(value_counter) = self.values.get_mut(&key) {
             value_counter.value = value;
-            self.update_frequency_bin(Rc::clone(&key));
+            self.update_frequency_bin(&key);
             return;
         }
         if self.len() >= self.capacity {
             self.evict();
         }
         self.values
-            .insert(Rc::clone(&key), ValueCounter { value, count: 1 });
+            .insert(key.clone(), ValueCounter { value, count: 1 });
         self.min_frequency = 1;
         self.frequency_bin
             .entry(self.min_frequency)
@@ -154,15 +152,15 @@ impl<K: Hash + Eq + Clone, V> LFUCache<K, V> {
 }
 
 pub struct LfuIterator<'a, K, V> {
-    values: Iter<'a, Rc<K>, ValueCounter<V>>,
+    values: Iter<'a, K, ValueCounter<V>>,
 }
 
 pub struct LfuConsumer<K, V> {
-    values: IntoIter<Rc<K>, ValueCounter<V>>,
+    values: IntoIter<K, ValueCounter<V>>,
 }
 
 impl<K, V> Iterator for LfuConsumer<K, V> {
-    type Item = (Rc<K>, V);
+    type Item = (K, V);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.values.next().map(|(k, v)| (k, v.value))
@@ -170,7 +168,7 @@ impl<K, V> Iterator for LfuConsumer<K, V> {
 }
 
 impl<K: Eq + Hash + Clone, V> IntoIterator for LFUCache<K, V> {
-    type Item = (Rc<K>, V);
+    type Item = (K, V);
     type IntoIter = LfuConsumer<K, V>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -181,17 +179,15 @@ impl<K: Eq + Hash + Clone, V> IntoIterator for LFUCache<K, V> {
 }
 
 impl<'a, K: Hash + Eq + Clone, V> Iterator for LfuIterator<'a, K, V> {
-    type Item = (Rc<K>, &'a V);
+    type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.values
-            .next()
-            .map(|(rc, vc)| (Rc::clone(rc), &vc.value))
+        self.values.next().map(|(key, vc)| (key, &vc.value))
     }
 }
 
 impl<'a, K: Hash + Eq + Clone, V> IntoIterator for &'a LFUCache<K, V> {
-    type Item = (Rc<K>, &'a V);
+    type Item = (&'a K, &'a V);
 
     type IntoIter = LfuIterator<'a, K, V>;
 
