@@ -24,30 +24,27 @@
 //! # }
 //! ```
 
-use std::collections::HashMap;
-use std::hash::Hash;
 use linked_hash_set::LinkedHashSet;
-use std::rc::Rc;
+use std::collections::hash_map::{IntoIter, Iter};
+use std::collections::HashMap;
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::ops::Index;
-use std::collections::hash_map::{Iter, IntoIter};
+use std::rc::Rc;
 
-
-#[derive(Debug)]
-pub struct LFUCache<K: Hash + Eq, V> {
+#[derive(Clone, Debug)]
+pub struct LFUCache<K: Hash + Eq + Clone, V> {
     values: HashMap<Rc<K>, ValueCounter<V>>,
     frequency_bin: HashMap<usize, LinkedHashSet<Rc<K>>>,
     capacity: usize,
     min_frequency: usize,
 }
 
-
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ValueCounter<V> {
     value: V,
     count: usize,
 }
-
 
 impl<V> ValueCounter<V> {
     fn inc(&mut self) {
@@ -55,8 +52,7 @@ impl<V> ValueCounter<V> {
     }
 }
 
-
-impl<K: Hash + Eq, V> LFUCache<K, V> {
+impl<K: Hash + Eq + Clone, V> LFUCache<K, V> {
     pub fn with_capacity(capacity: usize) -> LFUCache<K, V> {
         if capacity <= 0 {
             panic!("Unable to create cache: capacity is {:?}", capacity);
@@ -73,7 +69,6 @@ impl<K: Hash + Eq, V> LFUCache<K, V> {
         return self.values.contains_key(key);
     }
 
-
     pub fn len(&self) -> usize {
         self.values.len()
     }
@@ -82,7 +77,10 @@ impl<K: Hash + Eq, V> LFUCache<K, V> {
         let key = Rc::new(key);
         if let Some(value_counter) = self.values.get(&Rc::clone(&key)) {
             let count = value_counter.count;
-            self.frequency_bin.entry(count).or_default().remove(&Rc::clone(&key));
+            self.frequency_bin
+                .entry(count)
+                .or_default()
+                .remove(&Rc::clone(&key));
             self.values.remove(&key);
         }
         return false;
@@ -102,7 +100,6 @@ impl<K: Hash + Eq, V> LFUCache<K, V> {
         self.values.get_mut(&key).map(|x| &mut x.value)
     }
 
-
     fn update_frequency_bin(&mut self, key: Rc<K>) {
         let value_counter = self.values.get_mut(&key).unwrap();
         let bin = self.frequency_bin.get_mut(&value_counter.count).unwrap();
@@ -121,12 +118,16 @@ impl<K: Hash + Eq, V> LFUCache<K, V> {
         self.values.remove(&least_recently_used);
     }
 
-    pub fn iter(&self) -> LfuIterator<K, V> {
-        LfuIterator {
-            values: self.values.iter()
-        }
+    pub fn peek_lfu_key(&mut self) -> Option<K> {
+        let least_frequently_used_keys = self.frequency_bin.get_mut(&self.min_frequency).unwrap();
+        least_frequently_used_keys.front().map(|x| (**x).clone())
     }
 
+    pub fn iter(&self) -> LfuIterator<K, V> {
+        LfuIterator {
+            values: self.values.iter(),
+        }
+    }
 
     pub fn set(&mut self, key: K, value: V) {
         let key = Rc::new(key);
@@ -138,19 +139,22 @@ impl<K: Hash + Eq, V> LFUCache<K, V> {
         if self.len() >= self.capacity {
             self.evict();
         }
-        self.values.insert(Rc::clone(&key), ValueCounter { value, count: 1 });
+        self.values
+            .insert(Rc::clone(&key), ValueCounter { value, count: 1 });
         self.min_frequency = 1;
-        self.frequency_bin.entry(self.min_frequency).or_default().insert(key);
+        self.frequency_bin
+            .entry(self.min_frequency)
+            .or_default()
+            .insert(key);
     }
 }
 
 pub struct LfuIterator<'a, K, V> {
-    values: Iter<'a, Rc<K>, ValueCounter<V>>
+    values: Iter<'a, Rc<K>, ValueCounter<V>>,
 }
 
-
 pub struct LfuConsumer<K, V> {
-    values: IntoIter<Rc<K>, ValueCounter<V>>
+    values: IntoIter<Rc<K>, ValueCounter<V>>,
 }
 
 impl<K, V> Iterator for LfuConsumer<K, V> {
@@ -161,24 +165,28 @@ impl<K, V> Iterator for LfuConsumer<K, V> {
     }
 }
 
-impl<K: Eq + Hash, V> IntoIterator for LFUCache<K, V> {
+impl<K: Eq + Hash + Clone, V> IntoIterator for LFUCache<K, V> {
     type Item = (Rc<K>, V);
     type IntoIter = LfuConsumer<K, V>;
 
     fn into_iter(self) -> Self::IntoIter {
-        return LfuConsumer { values: self.values.into_iter() };
+        return LfuConsumer {
+            values: self.values.into_iter(),
+        };
     }
 }
 
-impl<'a, K: Hash + Eq, V> Iterator for LfuIterator<'a, K, V> {
+impl<'a, K: Hash + Eq + Clone, V> Iterator for LfuIterator<'a, K, V> {
     type Item = (Rc<K>, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.values.next().map(|(rc, vc)| (Rc::clone(rc), &vc.value))
+        self.values
+            .next()
+            .map(|(rc, vc)| (Rc::clone(rc), &vc.value))
     }
 }
 
-impl<'a, K: Hash + Eq, V> IntoIterator for &'a LFUCache<K, V> {
+impl<'a, K: Hash + Eq + Clone, V> IntoIterator for &'a LFUCache<K, V> {
     type Item = (Rc<K>, &'a V);
 
     type IntoIter = LfuIterator<'a, K, V>;
@@ -188,13 +196,10 @@ impl<'a, K: Hash + Eq, V> IntoIterator for &'a LFUCache<K, V> {
     }
 }
 
-
-impl<K: Hash + Eq, V> Index<K> for LFUCache<K, V> {
+impl<K: Hash + Eq + Clone, V> Index<K> for LFUCache<K, V> {
     type Output = V;
     fn index(&self, index: K) -> &Self::Output {
-        return self.values.
-            get(&Rc::new(index)).
-            map(|x| &x.value).unwrap();
+        return self.values.get(&Rc::new(index)).map(|x| &x.value).unwrap();
     }
 }
 
@@ -230,7 +235,6 @@ mod tests {
         assert_eq!(lfu.get(&2), None);
         assert_eq!(lfu[10], 10);
     }
-
 
     #[test]
     fn test_lfu_indexing() {
@@ -274,7 +278,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_lfu_iter() {
         let mut lfu = LFUCache::with_capacity(2);
@@ -282,10 +285,43 @@ mod tests {
         lfu.set(&2, 2);
         for (key, v) in lfu.iter() {
             match *key {
-                1 => { assert_eq!(v, &1); }
-                2 => { assert_eq!(v, &2); }
+                1 => {
+                    assert_eq!(v, &1);
+                }
+                2 => {
+                    assert_eq!(v, &2);
+                }
                 _ => {}
             }
         }
+    }
+
+    #[test]
+    fn clone_test() {
+        let mut lfu = LFUCache::with_capacity(2);
+        lfu.set(1, 1);
+        lfu.set(2, 2);
+        lfu.set(3, 3);
+
+        let lfu2 = lfu.clone();
+        for (key, vc) in lfu.values.iter() {
+            let (_key2, vc2) = lfu2.values.get_key_value(key).unwrap();
+            assert_eq!(vc.count, vc2.count);
+            assert_eq!(vc.value, vc2.value);
+        }
+    }
+
+    #[test]
+    fn peek_test() {
+        let mut lfu = LFUCache::with_capacity(2);
+        lfu.set(1, 1);
+        lfu.set(2, 2);
+
+        let _ = lfu.get(&1);
+        let peek = lfu.peek_lfu_key();
+        assert_eq!(peek, Some(2));
+
+        lfu.set(3, 3);
+        assert_eq!(lfu.get(&2), None);
     }
 }
