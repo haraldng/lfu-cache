@@ -1,21 +1,16 @@
+use crate::LinkedHashSetWrapper;
+use linked_hash_set::LinkedHashSet;
+use serde::{de::Visitor, ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::hash::Hash;
-use linked_hash_set::LinkedHashSet;
-use serde::{
-    Serialize, Deserialize,
-    de::{Visitor},
-    ser::SerializeSeq,
-    Serializer, Deserializer
-};
-use crate::LinkedHashSetWrapper;
 
 impl<T> Serialize for LinkedHashSetWrapper<T>
-    where
-        T: Serialize + PartialEq + Eq + Hash + Clone,
+where
+    T: Serialize + PartialEq + Eq + Hash + Clone,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
+    where
+        S: Serializer,
     {
         let len = self.0.len();
         let mut seq = serializer.serialize_seq(Some(len))?;
@@ -27,20 +22,20 @@ impl<T> Serialize for LinkedHashSetWrapper<T>
 }
 
 impl<'de, T> Deserialize<'de> for LinkedHashSetWrapper<T>
-    where
-        T: Deserialize<'de> + Eq + Hash + Clone,
+where
+    T: Deserialize<'de> + Eq + Hash + Clone,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         struct LinkedHashSetVisitor<T> {
             marker: std::marker::PhantomData<T>,
         }
 
         impl<'de, T> Visitor<'de> for LinkedHashSetVisitor<T>
-            where
-                T: Deserialize<'de> + Eq + Hash + Clone,
+        where
+            T: Deserialize<'de> + Eq + Hash + Clone,
         {
             type Value = LinkedHashSetWrapper<T>;
 
@@ -49,10 +44,10 @@ impl<'de, T> Deserialize<'de> for LinkedHashSetWrapper<T>
             }
 
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-                where
-                    A: serde::de::SeqAccess<'de>,
+            where
+                A: serde::de::SeqAccess<'de>,
             {
-                let size = seq.size_hint().unwrap_or_default();
+                let size = seq.size_hint().unwrap_or(u8::MAX as usize);
                 let mut lsh = LinkedHashSet::with_capacity(size);
                 while let Some(value) = seq.next_element()? {
                     lsh.insert(value);
@@ -70,8 +65,8 @@ impl<'de, T> Deserialize<'de> for LinkedHashSetWrapper<T>
 #[cfg(test)]
 mod tests {
 
-    use crate::*;
     use crate::tests::check_equality;
+    use crate::*;
 
     #[test]
     fn ser_test() {
@@ -99,5 +94,4 @@ mod tests {
         let lfu3: LFUCache<i32, i32> = serde_json::from_str(&ser).unwrap();
         check_equality(&lfu3, &lfu);
     }
-
 }

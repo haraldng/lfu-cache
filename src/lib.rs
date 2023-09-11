@@ -28,15 +28,13 @@
 mod serialization;
 
 use linked_hash_set::LinkedHashSet;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::{IntoIter, Iter};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Index;
-#[cfg(feature = "serde")]
-use serde::{
-    Serialize, Deserialize,
-};
 
 #[derive(Clone, Debug)]
 struct LinkedHashSetWrapper<K: Hash + Eq + Clone>(LinkedHashSet<K>);
@@ -47,7 +45,7 @@ impl<K: Hash + Eq + Clone> Default for LinkedHashSetWrapper<K> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LFUCache<K: Hash + Eq + Clone, V> {
     values: HashMap<K, ValueCounter<V>>,
@@ -145,10 +143,8 @@ impl<K: Hash + Eq + Clone, V> LFUCache<K, V> {
                 let least_recently_used = least_frequently_used_keys.0.pop_front().unwrap();
                 self.values.remove(&least_recently_used);
                 Some(least_recently_used)
-            },
-            None => {
-                None
-            },
+            }
+            None => None,
         }
     }
 
@@ -157,10 +153,8 @@ impl<K: Hash + Eq + Clone, V> LFUCache<K, V> {
             Some(least_frequently_used_keys) => {
                 let least_recently_used = least_frequently_used_keys.0.pop_front().unwrap();
                 self.values.remove(&least_recently_used).map(|x| x.value)
-            },
-            None => {
-                None
-            },
+            }
+            None => None,
         }
     }
 
@@ -246,7 +240,10 @@ impl<K: Hash + Eq + Clone, V> Index<K> for LFUCache<K, V> {
 mod tests {
     use super::*;
 
-    pub fn check_equality<K: Clone + Eq + Hash + Debug, V: Eq + Debug>(lfu: &LFUCache<K, V>, lfu2: &LFUCache<K, V>) {
+    pub fn check_equality<K: Clone + Eq + Hash + Debug, V: Eq + Debug>(
+        lfu: &LFUCache<K, V>,
+        lfu2: &LFUCache<K, V>,
+    ) {
         for (key, vc) in lfu.values.iter() {
             let (_key2, vc2) = lfu2.values.get_key_value(key).unwrap();
             assert_eq!(vc.count, vc2.count);
@@ -254,7 +251,7 @@ mod tests {
         }
         for (fb, fb2) in lfu.frequency_bin.iter().zip(lfu2.frequency_bin.iter()) {
             assert_eq!(fb.0, fb2.0);
-            assert_eq!(fb.1.0, fb2.1.0);
+            assert_eq!(fb.1 .0, fb2.1 .0);
         }
     }
 
